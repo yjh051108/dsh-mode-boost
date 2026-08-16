@@ -1,0 +1,7 @@
+# dsh-mode-boost bundle patch: host-plane reasoning-mode router.
+# Applied as ONE insert over the profile root; the user's profile
+# cordis.patch.yml addresses rows by id with the last write winning.
+- insert:
+    - id: mode-boost
+      name: '@dsh-external/dsh-mode-boost'
+      config: {}

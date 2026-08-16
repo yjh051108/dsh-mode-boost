@@ -27,11 +27,18 @@
 
 文本与探针**单一事实源**：`lib/core.js` 同时被插件与 `probe/run-mode-boost-eval.mjs` 引用。
 
+## 最低兼容（v0.1.1）
+
+首轮分类依赖 DSH 主机的 `AssembleContext.messages`（`assembleContextFor(agent, signal, claimed)`
+将本 step 已 claim、尚未落库的消息传入 `system-prompt/assemble`）。旧主机上首轮 assembly
+记录 `host-incompatible` 并让位，首条消息落库后的后续轮次恢复全部行为；升级顺序应为
+先升级 DSH 主机再装 v0.1.1。
+
 ## 安装（官方插件形态，三选一）
 
 ```powershell
 # 运行时热装（免重启；推荐开发态）
-dev_install_package D:\dsh\dsh-routing-suite\mode-boost
+dev_install_package <mode-boost 源目录>
 
 # 官方装配（重启后由 bundles 接管）
 dsh plugin --profile web add <解压目录或 tgz>
@@ -42,12 +49,13 @@ dsh plugin --profile web add github:.../dsh-mode-boost
 
 新会话选择官方 Standard preset 即生效（宿主平面 → 所有 preset 的会话受益）。
 
-## 行为与激活策略（v0.1.1，实测修正）
+## 行为与激活策略（v0.1.1）
 
-按会话的首条消息与 preset 面分派（活动日志可验证，`~/.dsh/mode-boost-activity.jsonl`）：
+按会话的首条**真实用户消息**与 preset 面分派（活动日志可验证，`~/.dsh/mode-boost-activity.jsonl`）：
 
 | 会话特征 | 动作 |
 |---|---|
+| 尚无任何真实用户消息（首轮 assembly 或诊断性裸 assemble） | **不判定**：原样返回，记录 `unclassified-no-user`（"没有消息"≠"寒暄"，缺失状态与空消息显式区分） |
 | 首条消息是寒暄/无任务（你好/hello/短句无关键词） | **整体让位**：不换 persona、不过滤工具、不注入引导（实测：deep persona 套在聊天上 → 338 块长思维链，创造模式会话复盘 2026-08-15） |
 | 编目含 `dev_router_status`（router-standard preset 行在场） | 整会话 no-op（不双重注入） |
 | minimal 面（bash + str_replace_editor，无 read/write） | **只加引导**：保留 RL 完整 persona（`complete:true`）与工具面 |
@@ -56,10 +64,19 @@ dsh plugin --profile web add github:.../dsh-mode-boost
 
 1. **首轮注入**（全量模式）：替换 persona section（保留 plan-mode section），首轮工具面收窄
    （spec read-first / react write-first / weak 写优先），首个工具调用后放行全目录。
-2. **近场引导**（weak 模式会话，每条真实用户消息后一条固定文本，缓存中性）：
+   首条消息取**已落库的真实用户消息优先、`context.messages`（claimed）兜底**，恢复窗口
+   （只有 pending `agent/inbox/spliced`、尚无 `user/message`）由官方 Inbox 投影统一覆盖。
+2. **近场引导**（weak 模式会话，每条进入模型请求的真实用户消息一条固定文本，缓存中性）：
+   在 `agent/pre-step` 瀑布注入（官方扩展点，可替换进入 step 的消息）：先 `await next()`，
+   `reject` 原样返回；guide 消息**追加到 decision.messages 尾部**（顺序：claimed →
+   runtime context/下游插件上下文 → mode-boost guide），随请求落库，满足 model-visible ⟺ logged。
    - 第 1-2 轮：分类引导；**第 3 轮起：boost 重分类**（"这是新任务，重新分类，勿沿用上轮风格"）；
+     round 按"已落库真实用户消息数 + 当前 batch 内序号"计算；
    - 简单任务 → 快速收敛版（1 步零浪费）；复杂任务 → 有向深度版
-     （架构/边界/集成点，不做环境猜疑；非 Flash 模型附决策闭环后缀）。
+     （架构/边界/集成点，不做环境猜疑；非 Flash 模型附决策闭环后缀）；
+   - **exactly-once**：loop 对每个 claimed batch 只执行一次 pre-step，request retry 复用同一
+     assembly，故纯消息转换即幂等，不依赖插件内状态；外层监听器 reject 时注入的 guide 随
+     decision 一起被丢弃，不落库、不调用模型。
 3. **deep-persona**：weak/Flash persona 内置"先深想再产出"（收敛 100%，persona 静态保缓存）。
 4. **按模型自动匹配**：Pro → w6c（spec 句 + 分类指令）；Flash → w7 + 深度锚 + 回顾/反跑题锚。
 5. **自优化工具**：`dev_mode_status` / `dev_mode_set` / `dev_mode_subagent`（与 router-standard
@@ -70,8 +87,18 @@ dsh plugin --profile web add github:.../dsh-mode-boost
 - **共存守卫（编目信号）**：首次 assembly 时若编目已含 `dev_router_status`（= router-standard
   preset 行已挂载）或存在 router-owned persona section → 本插件对该会话整体 no-op（不双重注入
   persona/引导）。自己的工具在守卫通过后**惰性注册**，保证信号不被自身污染。
-  活动日志可验证：`$DSH_HOME/mode-boost-activity.jsonl`（apply/assemble inactive|promoted|first-turn/guide）。
+  活动日志可验证：`$DSH_HOME/mode-boost-activity.jsonl`
+  （apply / assemble inactive|chat-standdown|guide-only|first-turn|promoted|unclassified-no-user|host-incompatible / guide）。
 - 迁移路径：删掉 `~/.dsh/.agent-presets/router-standard` fork 后，新会话由本插件全面接管。
+
+## 测试
+
+```sh
+npm test   # node --test tests/core.test.js tests/plugin.integration.test.js tests/real-combo.test.js tests/loader-combo.test.js
+```
+
+- `real-combo.test.js`：把插件装入官方 LLM/session/system-prompt/tools/agent/agent-loop 组合，验证 guide 进入同一步的 `user/message` 与模型请求（需要仓库构建产物，从仓库根目录执行）。
+- `loader-combo.test.js`：`npm pack` 打包产物安装进临时 node_modules，经 `dsh-app-boot` 的真实 Loader 从测试 `cordis.yml` 启动，覆盖发布清单（`cordis.patch.yml` 入包）与发布入口装配。
 
 ## 复现
 
