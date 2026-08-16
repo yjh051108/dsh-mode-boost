@@ -17,8 +17,14 @@
   "files": [
     "lib",
     "scripts/build.sh",
-    "README.md"
+    "README.md",
+    "cordis.patch.yml"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "license": "MIT",
   "peerDependencies": {
     "cordis": ">=4.0.0-rc <5"
