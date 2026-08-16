@@ -1,0 +1,13 @@
+# dsh-mode-boost bundle patch
+#
+# This file is the `dsh.bundle.patch` layer of the package: the profile boot
+# reads `dsh.bundle.patch` from package.json, parses this overlay, and mounts
+# the plugin row exactly like the manual cordis.patch.yml mount line used
+# before. One install command mounts the bundle — no profile file edits.
+#
+# The loader resolves `name` as the package from the profile's node_modules
+# (managed by dsh-super-injector / the bundle installer), so the entry's
+# plugin is @dsh-external/dsh-mode-boost (exports `apply`).
+- insert:
+    - id: mode-boost
+      name: '@dsh-external/dsh-mode-boost'
